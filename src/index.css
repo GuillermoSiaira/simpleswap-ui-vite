@@ -2,53 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Custom styles for react-select in dark mode */
-.select__control {
-  background-color: transparent !important;
-  border-color: #d1d5db !important;
+@layer base {
+  body {
+    @apply bg-gray-50 font-sans;
+  }
 }
 
-.dark .select__control {
-  border-color: #4b5563 !important;
-  background-color: transparent !important;
-}
+@layer components {
+  .btn-primary {
+    @apply bg-primary-600 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
 
-.dark .select__menu {
-  background-color: #374151 !important;
-  border-color: #4b5563 !important;
-}
+  .btn-secondary {
+    @apply bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+  }
 
-.dark .select__option {
-  background-color: #374151 !important;
-  color: #f3f4f6 !important;
-}
+  .input-field {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition-all duration-200;
+  }
 
-.dark .select__option:hover {
-  background-color: #4b5563 !important;
-}
-
-.dark .select__single-value {
-  color: #f3f4f6 !important;
-}
-
-.dark .select__placeholder {
-  color: #9ca3af !important;
-}
-
-.dark .select__indicator {
-  color: #9ca3af !important;
-}
-
-.dark .select__indicator:hover {
-  color: #f3f4f6 !important;
-}
-
-/* Reset some default styles that might conflict */
-body {
-  margin: 0;
-  min-height: 100vh;
-}
-
-#root {
-  min-height: 100vh;
+  .card {
+    @apply bg-white rounded-xl shadow-lg p-6 border border-gray-100;
+  }
 }
