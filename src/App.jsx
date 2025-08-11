@@ -265,18 +265,30 @@ function App() {
           console.log("Conexión existente encontrada:", accounts[0])
           setAccount(accounts[0])
 
-          // Verificar red
-          const chainId = await window.ethereum.request({ method: "eth_chainId" })
-          if (chainId !== "0xaa36a7") {
-            setContractIssues([
-              {
-                type: "error",
-                title: "Red Incorrecta",
-                description: `Estás en ${chainId} pero necesitas Sepolia (0xaa36a7)`,
-                solution: "Cambia a Sepolia testnet en MetaMask.",
-              },
-            ])
+          // Verificar red solo si hay una cuenta conectada
+          try {
+            const chainId = await window.ethereum.request({ method: "eth_chainId" })
+            console.log("ChainId detectado:", chainId)
+
+            if (chainId !== "0xaa36a7") {
+              setContractIssues([
+                {
+                  type: "error",
+                  title: "Red Incorrecta",
+                  description: `Estás conectado a la red ${chainId} pero necesitas Sepolia (0xaa36a7)`,
+                  solution: "Cambia a Sepolia testnet en MetaMask.",
+                },
+              ])
+            } else {
+              // Limpiar issues si estamos en la red correcta
+              setContractIssues([])
+            }
+          } catch (chainError) {
+            console.warn("No se pudo obtener chainId:", chainError)
           }
+        } else {
+          // No hay cuentas conectadas, limpiar cualquier issue de red
+          setContractIssues([])
         }
       } catch (error) {
         console.error("Error verificando conexión existente:", error)
@@ -489,11 +501,34 @@ function App() {
   async function verifyContractSetup() {
     try {
       console.log("=== VERIFICANDO CONFIGURACIÓN ===")
+
+      // Verificar que window.ethereum esté disponible
+      if (!window.ethereum) {
+        console.warn("⚠️ window.ethereum no disponible")
+        setContractIssues([
+          {
+            type: "error",
+            title: "Wallet No Detectada",
+            description: "No se detectó MetaMask u otra wallet compatible.",
+            solution: "Instala MetaMask y conéctate a Sepolia testnet.",
+          },
+        ])
+        return false
+      }
+
       const provider = new ethers.BrowserProvider(window.ethereum)
 
-      // Verificar red actual
-      const network = await provider.getNetwork()
-      console.log("Red actual:", network.name, "ChainId:", network.chainId.toString())
+      // Verificar red actual solo si hay una conexión activa
+      let network
+      try {
+        network = await provider.getNetwork()
+        console.log("Red actual:", network.name, "ChainId:", network.chainId.toString())
+      } catch (networkError) {
+        console.warn("No se pudo obtener información de red:", networkError)
+        // Si no podemos obtener la red, asumimos que no hay conexión activa
+        // y permitimos que el usuario se conecte
+        return true
+      }
 
       if (network.chainId !== 11155111n) {
         // Sepolia chainId
@@ -502,14 +537,14 @@ function App() {
           {
             type: "error",
             title: "Red Incorrecta",
-            description: `Estás en ${network.name} (${network.chainId}) pero necesitas Sepolia (11155111)`,
+            description: `Estás en ${network.name || "red desconocida"} (${network.chainId}) pero necesitas Sepolia (11155111)`,
             solution: "Cambia a Sepolia testnet en MetaMask.",
           },
         ])
         return false
       }
 
-      // Verificar contratos
+      // Verificar contratos solo si estamos en la red correcta
       console.log("Verificando contratos...")
       const [swapCode, tokenACode, tokenBCode] = await Promise.all([
         provider.getCode(SWAP_CONTRACT_ADDRESS),
