@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles for react-select in dark mode */
+.select__control {
+  background-color: transparent !important;
+  border-color: #d1d5db !important;
+}
+
+.dark .select__control {
+  border-color: #4b5563 !important;
+  background-color: transparent !important;
+}
+
+.dark .select__menu {
+  background-color: #374151 !important;
+  border-color: #4b5563 !important;
+}
+
+.dark .select__option {
+  background-color: #374151 !important;
+  color: #f3f4f6 !important;
+}
+
+.dark .select__option:hover {
+  background-color: #4b5563 !important;
+}
+
+.dark .select__single-value {
+  color: #f3f4f6 !important;
+}
+
+.dark .select__placeholder {
+  color: #9ca3af !important;
+}
+
+.dark .select__indicator {
+  color: #9ca3af !important;
+}
+
+.dark .select__indicator:hover {
+  color: #f3f4f6 !important;
+}
+
+/* Reset some default styles that might conflict */
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}

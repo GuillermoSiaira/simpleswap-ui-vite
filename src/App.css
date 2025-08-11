@@ -1,0 +1,46 @@
+.App {
+  text-align: center;
+}
+
+.App-header {
+  background-color: #282c34;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(10px + 2vmin);
+  color: white;
+}
+
+.account-info {
+  margin-bottom: 20px;
+}
+
+.account-info button {
+  padding: 10px 15px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.swap-section,
+.price-section {
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+.swap-section select,
+.swap-section input {
+  margin: 10px 0;
+  padding: 8px;
+  font-size: 16px;
+}
+
+.swap-section button,
+.price-section button {
+  padding: 10px 15px;
+  font-size: 16px;
+  cursor: pointer;
+}
