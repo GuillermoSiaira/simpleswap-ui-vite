@@ -52,7 +52,6 @@ function App() {
     console.log("TOKEN_B_ADDRESS:", TOKEN_B_ADDRESS)
     console.log("SWAP_CONTRACT_ADDRESS:", SWAP_CONTRACT_ADDRESS)
     console.log("ETHERSCAN_API_KEY:", ETHERSCAN_API_KEY ? "Set" : "Not set")
-    console.log("import.meta.env:", import.meta.env)
   }, [])
 
   // Persist dark mode in localStorage
@@ -66,262 +65,520 @@ function App() {
     localStorage.setItem("darkMode", isDarkMode)
   }, [isDarkMode])
 
-  // Handle MetaMask account changes
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.ethereum) {
-      const handleAccountsChanged = (accounts) => {
-        if (accounts.length === 0) {
-          setAccount(null)
-          console.log("MetaMask disconnected")
-        } else {
-          setAccount(accounts[0])
-          console.log("Account changed to:", accounts[0])
-        }
-      }
+  // Función para detectar y limpiar wallets conflictivas
+  function detectWalletIssues() {
+    console.log("Detectando configuración de wallets...")
 
-      const handleChainChanged = (chainId) => {
-        console.log("Chain changed to:", chainId)
-        window.location.reload()
-      }
-
-      window.ethereum.on("accountsChanged", handleAccountsChanged)
-      window.ethereum.on("chainChanged", handleChainChanged)
-
-      // Check if already connected
-      window.ethereum
-        .request({ method: "eth_accounts" })
-        .then((accounts) => {
-          if (accounts.length > 0) {
-            setAccount(accounts[0])
-          }
-        })
-        .catch(console.error)
-
-      return () => {
-        if (window.ethereum.removeListener) {
-          window.ethereum.removeListener("accountsChanged", handleAccountsChanged)
-          window.ethereum.removeListener("chainChanged", handleChainChanged)
-        }
-      }
+    if (!window.ethereum) {
+      return { hasWallet: false, issue: "No wallet detected" }
     }
-  }, [])
 
-  // Load token names
-  useEffect(() => {
-    if (!account || typeof window === "undefined" || !window.ethereum) return
+    // Detectar múltiples wallets
+    if (window.ethereum.providers && window.ethereum.providers.length > 1) {
+      console.log("Múltiples wallets detectadas:", window.ethereum.providers.length)
 
-    async function loadTokenNames() {
-      try {
-        const provider = new ethers.BrowserProvider(window.ethereum)
-        const tokenAContract = new ethers.Contract(TOKEN_A_ADDRESS, erc20Abi, provider)
-        const tokenBContract = new ethers.Contract(TOKEN_B_ADDRESS, erc20Abi, provider)
+      // Buscar MetaMask específicamente
+      const metamaskProvider = window.ethereum.providers.find(
+        (provider) => provider.isMetaMask && !provider.isCoreWallet,
+      )
 
-        const [nameA, symbolA, nameB, symbolB] = await Promise.all([
-          tokenAContract.name().catch(() => "Token A"),
-          tokenAContract.symbol().catch(() => "TKA"),
-          tokenBContract.name().catch(() => "Token B"),
-          tokenBContract.symbol().catch(() => "TKB"),
-        ])
-
-        setTokenNames({
-          A: `${nameA} (${symbolA})`,
-          B: `${nameB} (${symbolB})`,
-        })
-      } catch (error) {
-        console.error("Error loading token names:", error)
+      if (metamaskProvider) {
+        console.log("Seleccionando MetaMask...")
+        return { hasWallet: true, provider: metamaskProvider, issue: null }
+      } else {
+        return { hasWallet: true, issue: "MetaMask not found among multiple wallets" }
       }
     }
 
-    loadTokenNames()
-  }, [account])
+    // Wallet única
+    if (window.ethereum.isCoreWallet) {
+      return { hasWallet: true, issue: "CoreWallet detected - may cause conflicts" }
+    }
 
-  // Connect to MetaMask and switch to Sepolia
+    if (window.ethereum.isMetaMask) {
+      return { hasWallet: true, provider: window.ethereum, issue: null }
+    }
+
+    return { hasWallet: true, provider: window.ethereum, issue: "Unknown wallet type" }
+  }
+
+  // Conexión ultra-simplificada
   async function connectWallet() {
-    if (typeof window === "undefined" || !window.ethereum) {
-      alert("MetaMask not detected. Please install MetaMask extension.")
-      return
-    }
+    if (isConnecting) return
 
     setIsConnecting(true)
+    setSwapStatus("")
 
     try {
-      // Request account access
-      const accounts = await window.ethereum.request({
-        method: "eth_requestAccounts",
-      })
+      console.log("=== INICIANDO CONEXIÓN ===")
 
-      if (accounts.length === 0) {
-        alert("No accounts found. Please unlock MetaMask.")
+      // Detectar problemas de wallet
+      const walletCheck = detectWalletIssues()
+      console.log("Wallet check result:", walletCheck)
+
+      if (!walletCheck.hasWallet) {
+        alert("❌ No se detectó MetaMask. Por favor instala MetaMask.")
         return
       }
 
-      console.log("Accounts found:", accounts)
-
-      // Try to switch to Sepolia
-      try {
-        await window.ethereum.request({
-          method: "wallet_switchEthereumChain",
-          params: [{ chainId: "0xaa36a7" }],
-        })
-        console.log("Successfully switched to Sepolia")
-      } catch (switchError) {
-        console.log("Switch error:", switchError)
-        if (switchError.code === 4902) {
-          try {
-            await window.ethereum.request({
-              method: "wallet_addEthereumChain",
-              params: [
-                {
-                  chainId: "0xaa36a7",
-                  chainName: "Sepolia Test Network",
-                  nativeCurrency: {
-                    name: "SepoliaETH",
-                    symbol: "ETH",
-                    decimals: 18,
-                  },
-                  rpcUrls: ["https://sepolia.infura.io/v3/"],
-                  blockExplorerUrls: ["https://sepolia.etherscan.io/"],
-                },
-              ],
-            })
-            console.log("Successfully added Sepolia network")
-          } catch (addError) {
-            console.error("Failed to add Sepolia network:", addError)
-            alert("Failed to add Sepolia network to MetaMask")
-            return
-          }
-        } else {
-          console.error("Failed to switch to Sepolia:", switchError)
-          console.warn("Continuing with current network")
+      if (walletCheck.issue) {
+        console.warn("Wallet issue:", walletCheck.issue)
+        if (walletCheck.issue.includes("CoreWallet")) {
+          alert(
+            "⚠️ CoreWallet detectada. Esta aplicación funciona mejor con MetaMask. Si tienes problemas, desactiva CoreWallet temporalmente.",
+          )
         }
       }
 
+      // Usar el provider correcto
+      const targetProvider = walletCheck.provider || window.ethereum
+      console.log("Using provider:", targetProvider)
+
+      // Solicitar cuentas usando solo la API nativa
+      console.log("Solicitando cuentas...")
+      const accounts = await targetProvider.request({
+        method: "eth_requestAccounts",
+      })
+
+      console.log("Cuentas recibidas:", accounts)
+
+      if (!accounts || accounts.length === 0) {
+        throw new Error("No se obtuvieron cuentas")
+      }
+
+      // Establecer cuenta
       setAccount(accounts[0])
-      console.log("Connected to MetaMask:", accounts[0])
+      console.log("✅ Cuenta establecida:", accounts[0])
+
+      // Verificar red
+      console.log("Verificando red...")
+      const chainId = await targetProvider.request({ method: "eth_chainId" })
+      console.log("Red actual:", chainId)
+
+      if (chainId !== "0xaa36a7") {
+        console.log("Red incorrecta, intentando cambiar a Sepolia...")
+        setSwapStatus("🔄 Cambiando a red Sepolia...")
+
+        try {
+          await targetProvider.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: "0xaa36a7" }],
+          })
+          console.log("✅ Cambiado a Sepolia")
+        } catch (switchError) {
+          console.log("Error cambiando red:", switchError)
+          if (switchError.code === 4902) {
+            console.log("Agregando red Sepolia...")
+            try {
+              await targetProvider.request({
+                method: "wallet_addEthereumChain",
+                params: [
+                  {
+                    chainId: "0xaa36a7",
+                    chainName: "Sepolia Test Network",
+                    nativeCurrency: { name: "SepoliaETH", symbol: "ETH", decimals: 18 },
+                    rpcUrls: ["https://sepolia.infura.io/v3/"],
+                    blockExplorerUrls: ["https://sepolia.etherscan.io/"],
+                  },
+                ],
+              })
+              console.log("✅ Red Sepolia agregada")
+            } catch (addError) {
+              console.error("Error agregando Sepolia:", addError)
+              alert("❌ No se pudo agregar la red Sepolia. Por favor agrégala manualmente en MetaMask.")
+              return
+            }
+          } else {
+            alert("⚠️ Por favor cambia manualmente a la red Sepolia en MetaMask.")
+            return
+          }
+        }
+      }
+
+      setSwapStatus("✅ Wallet conectada exitosamente!")
+      console.log("=== CONEXIÓN COMPLETADA ===")
     } catch (error) {
-      console.error("Failed to connect to MetaMask:", error)
-      alert("Failed to connect to MetaMask: " + (error.message || error))
+      console.error("=== ERROR EN CONEXIÓN ===")
+      console.error("Error completo:", error)
+      console.error("Error code:", error.code)
+      console.error("Error message:", error.message)
+
+      let errorMessage = "Error desconocido"
+
+      if (error.code === 4001) {
+        errorMessage = "Conexión rechazada por el usuario"
+      } else if (error.code === -32002) {
+        errorMessage = "Ya hay una solicitud pendiente. Revisa MetaMask."
+      } else if (error.message) {
+        errorMessage = error.message
+      }
+
+      setSwapStatus(`❌ Error conectando: ${errorMessage}`)
+      alert(`❌ Error conectando: ${errorMessage}`)
     } finally {
       setIsConnecting(false)
     }
   }
 
-  // Load contract data and analyze issues
+  // Función para desconectar wallet
+  async function disconnectWallet() {
+    try {
+      console.log("Desconectando wallet...")
+
+      // Limpiar todos los estados
+      setAccount(null)
+      setBalances({ A: "0", B: "0" })
+      setReserves({ A: "0", B: "0" })
+      setAllowances({ A: "0", B: "0" })
+      setPrice(null)
+      setContractIssues([])
+      setSwapStatus("")
+      setSwapTxHash("")
+      setAmountIn("")
+      setEstimatedOut("")
+
+      // Limpiar localStorage
+      localStorage.removeItem("walletconnect")
+      localStorage.removeItem("WALLETCONNECT_DEEPLINK_CHOICE")
+
+      console.log("✅ Wallet desconectada")
+      setSwapStatus("✅ Wallet desconectada. Refresca la página para reconectar.")
+
+      // Recargar después de 2 segundos
+      setTimeout(() => {
+        window.location.reload()
+      }, 2000)
+    } catch (error) {
+      console.error("Error desconectando:", error)
+      window.location.reload()
+    }
+  }
+
+  // Verificar conexión existente al cargar la página
   useEffect(() => {
-    if (!account || typeof window === "undefined" || !window.ethereum) return
+    async function checkExistingConnection() {
+      if (!window.ethereum) return
+
+      try {
+        const accounts = await window.ethereum.request({ method: "eth_accounts" })
+        if (accounts && accounts.length > 0) {
+          console.log("Conexión existente encontrada:", accounts[0])
+          setAccount(accounts[0])
+
+          // Verificar red
+          const chainId = await window.ethereum.request({ method: "eth_chainId" })
+          if (chainId !== "0xaa36a7") {
+            setContractIssues([
+              {
+                type: "error",
+                title: "Red Incorrecta",
+                description: `Estás en ${chainId} pero necesitas Sepolia (0xaa36a7)`,
+                solution: "Cambia a Sepolia testnet en MetaMask.",
+              },
+            ])
+          }
+        }
+      } catch (error) {
+        console.error("Error verificando conexión existente:", error)
+      }
+    }
+
+    checkExistingConnection()
+  }, [])
+
+  // Cargar datos del contrato cuando hay cuenta
+  useEffect(() => {
+    if (!account) return
 
     async function loadData() {
       try {
-        console.log("Loading data for account:", account)
-        console.log("Using SimpleSwap contract:", SWAP_CONTRACT_ADDRESS)
+        console.log("Cargando datos del contrato...")
+        setSwapStatus("🔄 Verificando configuración...")
 
+        // Primero verificar que todo esté configurado correctamente
+        const isValid = await verifyContractSetup()
+        if (!isValid) {
+          setSwapStatus("❌ Configuración inválida - revisa las direcciones de contratos")
+          return
+        }
+
+        setSwapStatus("🔄 Cargando datos del contrato...")
+
+        // Crear provider temporal
         const provider = new ethers.BrowserProvider(window.ethereum)
         const swap = new ethers.Contract(SWAP_CONTRACT_ADDRESS, simpleSwapAbi, provider)
         const issues = []
 
-        try {
-          // Load user balances
-          const tokenAContract = new ethers.Contract(TOKEN_A_ADDRESS, erc20Abi, provider)
-          const tokenBContract = new ethers.Contract(TOKEN_B_ADDRESS, erc20Abi, provider)
+        // Cargar contratos de tokens
+        const tokenAContract = new ethers.Contract(TOKEN_A_ADDRESS, erc20Abi, provider)
+        const tokenBContract = new ethers.Contract(TOKEN_B_ADDRESS, erc20Abi, provider)
 
-          const [balA, balB, allowanceA, allowanceB] = await Promise.all([
-            tokenAContract.balanceOf(account),
-            tokenBContract.balanceOf(account),
-            tokenAContract.allowance(account, SWAP_CONTRACT_ADDRESS),
-            tokenBContract.allowance(account, SWAP_CONTRACT_ADDRESS),
+        // Cargar nombres de tokens con validación
+        try {
+          console.log("Cargando nombres de tokens...")
+
+          const [nameA, symbolA, nameB, symbolB] = await Promise.all([
+            tokenAContract.name().catch(() => "Token A"),
+            tokenAContract.symbol().catch(() => "TKA"),
+            tokenBContract.name().catch(() => "Token B"),
+            tokenBContract.symbol().catch(() => "TKB"),
           ])
 
-          setBalances({
-            A: ethers.formatEther(balA),
-            B: ethers.formatEther(balB),
+          setTokenNames({
+            A: `${nameA} (${symbolA})`,
+            B: `${nameB} (${symbolB})`,
           })
 
-          setAllowances({
-            A: ethers.formatEther(allowanceA),
-            B: ethers.formatEther(allowanceB),
-          })
+          console.log("Nombres de tokens cargados:", { A: `${nameA} (${symbolA})`, B: `${nameB} (${symbolB})` })
+        } catch (error) {
+          console.error("Error loading token names:", error)
+          setTokenNames({ A: "Token A (TKA)", B: "Token B (TKB)" })
+        }
 
-          // Load reserves using the correct function
+        // Cargar balances y allowances con validación
+        try {
+          console.log("Verificando contratos de tokens...")
+
+          // Verificar que los contratos existan
+          const [codeA, codeB] = await Promise.all([
+            provider.getCode(TOKEN_A_ADDRESS),
+            provider.getCode(TOKEN_B_ADDRESS),
+          ])
+
+          if (codeA === "0x") {
+            issues.push({
+              type: "error",
+              title: "Token A No Encontrado",
+              description: `El contrato en ${TOKEN_A_ADDRESS} no existe o no está desplegado.`,
+              solution: "Verifica la dirección del Token A en el archivo .env",
+            })
+          }
+
+          if (codeB === "0x") {
+            issues.push({
+              type: "error",
+              title: "Token B No Encontrado",
+              description: `El contrato en ${TOKEN_B_ADDRESS} no existe o no está desplegado.`,
+              solution: "Verifica la dirección del Token B en el archivo .env",
+            })
+          }
+
+          // Solo intentar cargar balances si los contratos existen
+          if (codeA !== "0x" && codeB !== "0x") {
+            console.log("Cargando balances de tokens...")
+
+            const [balA, balB, allowanceA, allowanceB] = await Promise.all([
+              tokenAContract.balanceOf(account).catch((err) => {
+                console.error("Error getting balance A:", err)
+                return 0n
+              }),
+              tokenBContract.balanceOf(account).catch((err) => {
+                console.error("Error getting balance B:", err)
+                return 0n
+              }),
+              tokenAContract.allowance(account, SWAP_CONTRACT_ADDRESS).catch((err) => {
+                console.error("Error getting allowance A:", err)
+                return 0n
+              }),
+              tokenBContract.allowance(account, SWAP_CONTRACT_ADDRESS).catch((err) => {
+                console.error("Error getting allowance B:", err)
+                return 0n
+              }),
+            ])
+
+            setBalances({
+              A: ethers.formatEther(balA),
+              B: ethers.formatEther(balB),
+            })
+
+            setAllowances({
+              A: ethers.formatEther(allowanceA),
+              B: ethers.formatEther(allowanceB),
+            })
+
+            if (balA === 0n && balB === 0n) {
+              issues.push({
+                type: "warning",
+                title: "Sin Tokens",
+                description: "No tienes tokens para hacer swap.",
+                solution: "Consigue tokens de prueba de un faucet o verifica que estés en la red correcta.",
+              })
+            }
+          } else {
+            // Si los contratos no existen, establecer valores por defecto
+            setBalances({ A: "0", B: "0" })
+            setAllowances({ A: "0", B: "0" })
+          }
+        } catch (error) {
+          console.error("Error loading balances:", error)
+          setBalances({ A: "0", B: "0" })
+          setAllowances({ A: "0", B: "0" })
+          issues.push({
+            type: "error",
+            title: "Error Cargando Tokens",
+            description: "No se pudieron cargar los balances de tokens: " + error.message,
+            solution: "Verifica que las direcciones de tokens sean correctas y estés en Sepolia.",
+          })
+        }
+
+        // Cargar reservas
+        try {
           const [reserveA, reserveB] = await swap.getReserves(TOKEN_A_ADDRESS, TOKEN_B_ADDRESS)
           setReserves({
             A: ethers.formatEther(reserveA),
             B: ethers.formatEther(reserveB),
           })
 
-          console.log("User balances:", { A: ethers.formatEther(balA), B: ethers.formatEther(balB) })
-          console.log("Reserves:", { A: ethers.formatEther(reserveA), B: ethers.formatEther(reserveB) })
-
-          // Analyze potential issues
           if (reserveA === 0n && reserveB === 0n) {
             issues.push({
               type: "error",
-              title: "No Liquidity in Pool",
-              description: "The pool has no liquidity. You need to add liquidity before swapping.",
-              solution: "Use addLiquidity function or ask the pool owner to add liquidity.",
+              title: "Sin Liquidez",
+              description: "El pool no tiene liquidez.",
+              solution: "Agrega liquidez al pool primero.",
             })
           }
-
-          if (balA === 0n && balB === 0n) {
-            issues.push({
-              type: "warning",
-              title: "No User Tokens",
-              description: "You don't have any tokens to swap.",
-              solution: "Get some test tokens from a faucet or mint them if possible.",
-            })
-          }
-        } catch (balanceError) {
-          console.error("Error loading balances:", balanceError)
+        } catch (error) {
+          console.error("Error loading reserves:", error)
           issues.push({
             type: "error",
-            title: "Token Loading Failed",
-            description: "Could not load token balances. Tokens may not exist on this network.",
-            solution: "Check that the token addresses are correct for Sepolia testnet.",
+            title: "Error Cargando Reservas",
+            description: "No se pudieron cargar las reservas del pool.",
+            solution: "Verifica que el contrato esté desplegado correctamente.",
           })
         }
 
+        // Cargar precio
         try {
-          // Load price using the available getPrice function
           const rawPrice = await swap.getPrice(TOKEN_A_ADDRESS, TOKEN_B_ADDRESS)
           setPrice(ethers.formatEther(rawPrice))
-          console.log("Price A→B:", ethers.formatEther(rawPrice))
 
           if (rawPrice === 0n) {
             issues.push({
               type: "warning",
-              title: "Zero Price",
-              description: "The contract is returning a price of 0, indicating no liquidity.",
-              solution: "Add liquidity to the pool first.",
+              title: "Precio Cero",
+              description: "El precio es 0, indica falta de liquidez.",
+              solution: "Agrega liquidez al pool.",
             })
           }
-        } catch (priceError) {
-          console.error("Error loading price:", priceError)
+        } catch (error) {
+          console.error("Error loading price:", error)
+          setPrice("0")
           issues.push({
             type: "error",
-            title: "Price Loading Failed",
-            description: "Could not get price from contract. May indicate no reserves.",
-            solution: "Add liquidity to the pool first.",
+            title: "Error Cargando Precio",
+            description: "No se pudo obtener el precio del contrato.",
+            solution: "Agrega liquidez al pool primero.",
           })
-          setPrice("0")
         }
 
         setContractIssues(issues)
+        setSwapStatus("✅ Datos cargados correctamente")
+
+        // Limpiar mensaje después de 3 segundos
+        setTimeout(() => setSwapStatus(""), 3000)
       } catch (error) {
         console.error("Error loading data:", error)
-        setSwapStatus("Error loading contract data: " + error.message)
+        setSwapStatus("❌ Error cargando datos del contrato: " + error.message)
       }
     }
 
     loadData()
-  }, [account, swapTxHash, inputToken])
+  }, [account, swapTxHash])
 
-  // Estimate output on amount change
+  // Función para verificar la configuración del contrato
+  async function verifyContractSetup() {
+    try {
+      console.log("=== VERIFICANDO CONFIGURACIÓN ===")
+      const provider = new ethers.BrowserProvider(window.ethereum)
+
+      // Verificar red actual
+      const network = await provider.getNetwork()
+      console.log("Red actual:", network.name, "ChainId:", network.chainId.toString())
+
+      if (network.chainId !== 11155111n) {
+        // Sepolia chainId
+        console.warn("⚠️ No estás en Sepolia testnet")
+        setContractIssues([
+          {
+            type: "error",
+            title: "Red Incorrecta",
+            description: `Estás en ${network.name} (${network.chainId}) pero necesitas Sepolia (11155111)`,
+            solution: "Cambia a Sepolia testnet en MetaMask.",
+          },
+        ])
+        return false
+      }
+
+      // Verificar contratos
+      console.log("Verificando contratos...")
+      const [swapCode, tokenACode, tokenBCode] = await Promise.all([
+        provider.getCode(SWAP_CONTRACT_ADDRESS),
+        provider.getCode(TOKEN_A_ADDRESS),
+        provider.getCode(TOKEN_B_ADDRESS),
+      ])
+
+      console.log("Swap contract code length:", swapCode.length)
+      console.log("Token A code length:", tokenACode.length)
+      console.log("Token B code length:", tokenBCode.length)
+
+      const issues = []
+
+      if (swapCode === "0x") {
+        issues.push({
+          type: "error",
+          title: "Contrato Swap No Encontrado",
+          description: `El contrato SimpleSwap en ${SWAP_CONTRACT_ADDRESS} no existe.`,
+          solution: "Verifica la dirección del contrato en el archivo .env",
+        })
+      }
+
+      if (tokenACode === "0x") {
+        issues.push({
+          type: "error",
+          title: "Token A No Encontrado",
+          description: `El Token A en ${TOKEN_A_ADDRESS} no existe.`,
+          solution: "Verifica la dirección del Token A en el archivo .env",
+        })
+      }
+
+      if (tokenBCode === "0x") {
+        issues.push({
+          type: "error",
+          title: "Token B No Encontrado",
+          description: `El Token B en ${TOKEN_B_ADDRESS} no existe.`,
+          solution: "Verifica la dirección del Token B en el archivo .env",
+        })
+      }
+
+      if (issues.length > 0) {
+        setContractIssues(issues)
+        return false
+      }
+
+      console.log("✅ Todos los contratos verificados correctamente")
+      return true
+    } catch (error) {
+      console.error("Error verificando contratos:", error)
+      setContractIssues([
+        {
+          type: "error",
+          title: "Error de Verificación",
+          description: "No se pudo verificar la configuración de contratos: " + error.message,
+          solution: "Verifica tu conexión y que estés en Sepolia testnet.",
+        },
+      ])
+      return false
+    }
+  }
+
+  // Estimar output
   async function onInChange(e) {
     const val = e.target.value
     setAmountIn(val)
     setSwapStatus("")
     setSwapTxHash("")
 
-    if (!val || !account || typeof window === "undefined" || !window.ethereum) {
+    if (!val || !account) {
       setEstimatedOut("")
       return
     }
@@ -330,7 +587,6 @@ function App() {
       const provider = new ethers.BrowserProvider(window.ethereum)
       const swap = new ethers.Contract(SWAP_CONTRACT_ADDRESS, simpleSwapAbi, provider)
 
-      // Get reserves for the correct direction
       const [reserveA, reserveB] = await swap.getReserves(TOKEN_A_ADDRESS, TOKEN_B_ADDRESS)
 
       let reserveIn, reserveOut
@@ -343,25 +599,23 @@ function App() {
       }
 
       if (reserveIn === 0n || reserveOut === 0n) {
-        setEstimatedOut("No liquidity")
+        setEstimatedOut("Sin liquidez")
         return
       }
 
       const amountInWei = ethers.parseEther(val)
       const estimatedOutWei = await swap.getAmountOut(amountInWei, reserveIn, reserveOut)
-
       setEstimatedOut(ethers.formatEther(estimatedOutWei))
-      console.log("Estimated output:", ethers.formatEther(estimatedOutWei))
     } catch (error) {
       console.error("Error estimating output:", error)
-      setEstimatedOut("Error calculating")
+      setEstimatedOut("Error calculando")
     }
   }
 
-  // Add liquidity function
+  // Agregar liquidez
   async function addLiquidity() {
-    if (!account || typeof window === "undefined" || !window.ethereum) return
-    setSwapStatus("Adding liquidity to the pool...")
+    if (!account) return
+    setSwapStatus("Agregando liquidez al pool...")
 
     try {
       const provider = new ethers.BrowserProvider(window.ethereum)
@@ -371,122 +625,111 @@ function App() {
       const tokenAContract = new ethers.Contract(TOKEN_A_ADDRESS, erc20Abi, signer)
       const tokenBContract = new ethers.Contract(TOKEN_B_ADDRESS, erc20Abi, signer)
 
-      const liquidityAmount = ethers.parseEther("100") // Add 100 tokens each
+      const liquidityAmount = ethers.parseEther("100")
 
-      // Check user balances first
+      // Verificar balances
       const userBalA = await tokenAContract.balanceOf(account)
       const userBalB = await tokenBContract.balanceOf(account)
 
       if (userBalA < liquidityAmount) {
-        setSwapStatus(`❌ Insufficient Token A balance. You have ${ethers.formatEther(userBalA)} but need 100`)
+        setSwapStatus(`❌ Balance insuficiente Token A. Tienes ${ethers.formatEther(userBalA)} pero necesitas 100`)
         return
       }
 
       if (userBalB < liquidityAmount) {
-        setSwapStatus(`❌ Insufficient Token B balance. You have ${ethers.formatEther(userBalB)} but need 100`)
+        setSwapStatus(`❌ Balance insuficiente Token B. Tienes ${ethers.formatEther(userBalB)} pero necesitas 100`)
         return
       }
 
-      // Approve tokens
-      setSwapStatus("Approving Token A...")
+      // Aprobar tokens
+      setSwapStatus("Aprobando Token A...")
       const approveATx = await tokenAContract.approve(SWAP_CONTRACT_ADDRESS, liquidityAmount)
       await approveATx.wait()
 
-      setSwapStatus("Approving Token B...")
+      setSwapStatus("Aprobando Token B...")
       const approveBTx = await tokenBContract.approve(SWAP_CONTRACT_ADDRESS, liquidityAmount)
       await approveBTx.wait()
 
-      // Add liquidity
-      setSwapStatus("Adding liquidity...")
+      // Agregar liquidez
+      setSwapStatus("Agregando liquidez...")
       const tx = await swap.addLiquidity(
         TOKEN_A_ADDRESS,
         TOKEN_B_ADDRESS,
-        liquidityAmount, // amountADesired
-        liquidityAmount, // amountBDesired
-        ethers.parseEther("90"), // amountAMin (10% slippage)
-        ethers.parseEther("90"), // amountBMin (10% slippage)
-        account, // to
-        Math.floor(Date.now() / 1000) + 3600, // deadline (1 hour)
+        liquidityAmount,
+        liquidityAmount,
+        ethers.parseEther("90"),
+        ethers.parseEther("90"),
+        account,
+        Math.floor(Date.now() / 1000) + 3600,
       )
 
       await tx.wait()
-      setSwapStatus("✅ Liquidity added successfully!")
+      setSwapStatus("✅ Liquidez agregada exitosamente!")
       setSwapTxHash(tx.hash)
     } catch (error) {
       console.error("Add liquidity error:", error)
-      setSwapStatus("❌ Failed to add liquidity: " + error.message)
+      setSwapStatus("❌ Error agregando liquidez: " + error.message)
     }
   }
 
-  // Perform swap using the correct function
+  // Realizar swap
   async function doSwap() {
-    if (
-      !estimatedOut ||
-      !account ||
-      estimatedOut === "No liquidity" ||
-      estimatedOut === "Error calculating" ||
-      typeof window === "undefined" ||
-      !window.ethereum
-    )
-      return
+    if (!estimatedOut || !account || estimatedOut === "Sin liquidez" || estimatedOut === "Error calculando") return
 
     const inputAddr = inputToken === "A" ? TOKEN_A_ADDRESS : TOKEN_B_ADDRESS
     const outputAddr = inputToken === "A" ? TOKEN_B_ADDRESS : TOKEN_A_ADDRESS
     const inWei = ethers.parseEther(amountIn)
 
-    setSwapStatus("Preparing swap...")
+    setSwapStatus("Preparando swap...")
     setSwapTxHash("")
 
     try {
       const provider = new ethers.BrowserProvider(window.ethereum)
       const signer = await provider.getSigner()
 
-      // Check current allowance
+      // Verificar allowance
       const currentAllowance = Number.parseFloat(allowances[inputToken])
       const requiredAmount = Number.parseFloat(amountIn)
 
       if (currentAllowance < requiredAmount) {
-        setSwapStatus("Approving tokens...")
+        setSwapStatus("Aprobando tokens...")
         const approval = new ethers.Contract(inputAddr, erc20Abi, signer)
         const approveTx = await approval.approve(SWAP_CONTRACT_ADDRESS, inWei)
         await approveTx.wait()
-        console.log("Approval successful")
       }
 
-      setSwapStatus("Executing swap...")
+      setSwapStatus("Ejecutando swap...")
       const swapContract = new ethers.Contract(SWAP_CONTRACT_ADDRESS, simpleSwapAbi, signer)
 
-      // Calculate minimum output (5% slippage tolerance)
       const estimatedOutWei = ethers.parseEther(estimatedOut)
       const minAmountOut = (estimatedOutWei * 95n) / 100n // 5% slippage
 
-      // Use the correct function: swapExactTokensForTokens
       const tx = await swapContract.swapExactTokensForTokens(
-        inWei, // amountIn
-        minAmountOut, // amountOutMin
-        [inputAddr, outputAddr], // path
-        account, // to
-        Math.floor(Date.now() / 1000) + 3600, // deadline (1 hour)
+        inWei,
+        minAmountOut,
+        [inputAddr, outputAddr],
+        account,
+        Math.floor(Date.now() / 1000) + 3600,
       )
 
-      setSwapStatus("Confirming transaction...")
+      setSwapStatus("Confirmando transacción...")
       const receipt = await tx.wait()
-      setSwapStatus("✅ Swap completed successfully!")
+      setSwapStatus("✅ Swap completado exitosamente!")
       setSwapTxHash(receipt.transactionHash)
     } catch (err) {
       console.error("Swap error:", err)
-      setSwapStatus("❌ Swap failed: " + (err.message || "Unknown error"))
+      setSwapStatus("❌ Swap falló: " + (err.message || "Error desconocido"))
     }
   }
 
-  // Fetch recent transactions
+  // Obtener transacciones recientes
   async function fetchRecentTxs() {
-    setTxStatus("Fetching…")
+    setTxStatus("Cargando...")
     setRecentTxs([])
 
     try {
       if (!ETHERSCAN_API_KEY) {
-        setTxStatus("Missing VITE_ETHERSCAN_API_KEY in .env")
+        setTxStatus("Falta VITE_ETHERSCAN_API_KEY en .env")
         return
       }
 
@@ -509,7 +752,7 @@ function App() {
       }
     } catch (err) {
       console.error("Fetch transactions error:", err)
-      setTxStatus("Fetch failed: " + err.message)
+      setTxStatus("Error cargando: " + err.message)
     }
   }
 
@@ -527,7 +770,7 @@ function App() {
                 className="flex items-center space-x-1 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400"
               >
                 <span>
-                  Contract: {SWAP_CONTRACT_ADDRESS?.slice(0, 6)}...{SWAP_CONTRACT_ADDRESS?.slice(-4)}
+                  Contrato: {SWAP_CONTRACT_ADDRESS?.slice(0, 6)}...{SWAP_CONTRACT_ADDRESS?.slice(-4)}
                 </span>
                 <FiExternalLink size={14} />
               </a>
@@ -550,14 +793,14 @@ function App() {
               <div className="flex items-start space-x-3">
                 <FiAlertTriangle className="text-yellow-600 dark:text-yellow-400 mt-1" size={20} />
                 <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-yellow-800 dark:text-yellow-200 mb-3">Pool Status</h3>
+                  <h3 className="text-lg font-semibold text-yellow-800 dark:text-yellow-200 mb-3">Estado del Pool</h3>
                   <div className="space-y-3">
                     {contractIssues.map((issue, index) => (
                       <div key={index} className="border-l-4 border-yellow-400 pl-4">
                         <h4 className="font-medium text-yellow-800 dark:text-yellow-200">{issue.title}</h4>
                         <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">{issue.description}</p>
                         <p className="text-sm text-yellow-600 dark:text-yellow-400 mt-1">
-                          <strong>Solution:</strong> {issue.solution}
+                          <strong>Solución:</strong> {issue.solution}
                         </p>
                       </div>
                     ))}
@@ -572,19 +815,43 @@ function App() {
           <aside className="lg:col-span-1">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 sticky top-8">
               <div className="mb-6">
-                <button
-                  onClick={connectWallet}
-                  disabled={isConnecting}
-                  className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
-                    account
-                      ? "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-700"
-                      : isConnecting
+                {!account ? (
+                  <button
+                    onClick={connectWallet}
+                    disabled={isConnecting}
+                    className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
+                      isConnecting
                         ? "bg-gray-400 cursor-not-allowed text-white"
                         : "bg-blue-600 hover:bg-blue-700 text-white"
-                  }`}
-                >
-                  {isConnecting ? "Connecting..." : account ? "✅ Wallet Connected" : "Connect Wallet"}
-                </button>
+                    }`}
+                  >
+                    {isConnecting ? "🔄 Conectando..." : "🦊 Conectar MetaMask"}
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <button
+                      className="w-full py-3 px-4 rounded-lg font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-700"
+                      disabled
+                    >
+                      ✅ Wallet Conectada
+                    </button>
+                    <button
+                      onClick={disconnectWallet}
+                      className="w-full py-2 px-3 rounded-lg font-medium bg-red-600 hover:bg-red-700 text-white text-sm transition-colors"
+                    >
+                      🔌 Desconectar Wallet
+                    </button>
+                  </div>
+                )}
+
+                {account && (
+                  <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900 rounded-lg">
+                    <p className="text-xs text-blue-800 dark:text-blue-200">
+                      <strong>⚠️ Importante:</strong> Esta aplicación funciona solo en Sepolia testnet.
+                    </p>
+                  </div>
+                )}
+
                 {account && (
                   <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 text-center">
                     {account.slice(0, 6)}...{account.slice(-4)}
@@ -593,7 +860,7 @@ function App() {
               </div>
 
               <div className="mb-6">
-                <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-gray-100">Current Price</h3>
+                <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-gray-100">Precio Actual</h3>
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-3">
                   <p className="text-sm font-mono">
                     1 {inputToken} ≈ {price || "0"} {outputToken}
@@ -602,7 +869,7 @@ function App() {
               </div>
 
               <div className="mb-6">
-                <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-gray-100">Your Balances</h3>
+                <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-gray-100">Tus Balances</h3>
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600 dark:text-gray-400">{tokenNames.A}:</span>
@@ -616,7 +883,7 @@ function App() {
               </div>
 
               <div className="mb-6">
-                <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-gray-100">Pool Reserves</h3>
+                <h3 className="text-lg font-semibold mb-3 text-gray-900 dark:text-gray-100">Reservas del Pool</h3>
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600 dark:text-gray-400">{tokenNames.A}:</span>
@@ -635,22 +902,22 @@ function App() {
                   disabled={!account}
                   className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-medium transition-colors"
                 >
-                  💧 Add Liquidity (100 each)
+                  💧 Agregar Liquidez (100 c/u)
                 </button>
                 <button
                   onClick={() => setShowContractInfo(!showContractInfo)}
                   className="w-full py-2 px-3 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors"
                 >
                   <FiInfo className="inline mr-1" />
-                  {showContractInfo ? "Hide" : "Show"} Contract Info
+                  {showContractInfo ? "Ocultar" : "Mostrar"} Info Contrato
                 </button>
               </div>
 
               {showContractInfo && (
                 <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-xs">
-                  <h4 className="font-semibold mb-2">Contract Details:</h4>
+                  <h4 className="font-semibold mb-2">Detalles del Contrato:</h4>
                   <p className="mb-1">
-                    <strong>Address:</strong> {SWAP_CONTRACT_ADDRESS}
+                    <strong>Dirección:</strong> {SWAP_CONTRACT_ADDRESS}
                   </p>
                   <p className="mb-1">
                     <strong>Token A:</strong> {TOKEN_A_ADDRESS}
@@ -659,8 +926,8 @@ function App() {
                     <strong>Token B:</strong> {TOKEN_B_ADDRESS}
                   </p>
                   <p className="text-gray-600 dark:text-gray-400 mt-2">
-                    This is a Uniswap V2-style AMM with 0.3% trading fees. It requires liquidity to be added before
-                    swaps can be performed.
+                    Este es un AMM estilo Uniswap V2 con comisiones del 0.3%. Requiere liquidez antes de poder hacer
+                    swaps.
                   </p>
                 </div>
               )}
@@ -670,12 +937,12 @@ function App() {
           <main className="lg:col-span-2">
             <div className="space-y-8">
               <section>
-                <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">Swap Tokens</h2>
+                <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">Intercambiar Tokens</h2>
                 <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        From Token
+                        Token Origen
                       </label>
                       <Select
                         options={[
@@ -695,10 +962,12 @@ function App() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Amount</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Cantidad
+                      </label>
                       <input
                         type="number"
-                        placeholder={`Enter ${tokenNames[inputToken]} amount`}
+                        placeholder={`Ingresa cantidad de ${tokenNames[inputToken]}`}
                         value={amountIn}
                         onChange={onInChange}
                         className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-transparent focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -707,11 +976,11 @@ function App() {
 
                     <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-3">
                       <p className="text-sm text-gray-600 dark:text-gray-400">
-                        Estimated {tokenNames[outputToken]}: <span className="font-mono">{estimatedOut || "–"}</span>
+                        Estimado {tokenNames[outputToken]}: <span className="font-mono">{estimatedOut || "–"}</span>
                       </p>
-                      {estimatedOut && !["No liquidity", "Error calculating", "–"].includes(estimatedOut) && (
+                      {estimatedOut && !["Sin liquidez", "Error calculando", "–"].includes(estimatedOut) && (
                         <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                          Minimum received (5% slippage): {(Number.parseFloat(estimatedOut) * 0.95).toFixed(6)}
+                          Mínimo recibido (5% slippage): {(Number.parseFloat(estimatedOut) * 0.95).toFixed(6)}
                         </p>
                       )}
                     </div>
@@ -721,37 +990,37 @@ function App() {
                       disabled={
                         !estimatedOut ||
                         !account ||
-                        estimatedOut === "No liquidity" ||
-                        estimatedOut === "Error calculating"
+                        estimatedOut === "Sin liquidez" ||
+                        estimatedOut === "Error calculando"
                       }
                       className="w-full py-3 px-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
                     >
                       {!account
-                        ? "Connect Wallet"
+                        ? "Conectar Wallet"
                         : !estimatedOut || estimatedOut === "–"
-                          ? "Enter Amount"
-                          : estimatedOut === "No liquidity"
-                            ? "No Liquidity - Add Liquidity First"
-                            : estimatedOut === "Error calculating"
-                              ? "Cannot Calculate - Check Pool"
-                              : "Swap Tokens"}
+                          ? "Ingresa Cantidad"
+                          : estimatedOut === "Sin liquidez"
+                            ? "Sin Liquidez - Agrega Liquidez Primero"
+                            : estimatedOut === "Error calculando"
+                              ? "No se Puede Calcular - Verifica Pool"
+                              : "Intercambiar Tokens"}
                     </button>
 
                     {swapStatus && (
                       <div
                         className={`mt-4 p-3 rounded-lg ${
-                          swapStatus.includes("❌") || swapStatus.includes("failed")
+                          swapStatus.includes("❌") || swapStatus.includes("falló")
                             ? "bg-red-50 dark:bg-red-900"
-                            : swapStatus.includes("✅") || swapStatus.includes("successfully")
+                            : swapStatus.includes("✅") || swapStatus.includes("exitosamente")
                               ? "bg-green-50 dark:bg-green-900"
                               : "bg-blue-50 dark:bg-blue-900"
                         }`}
                       >
                         <p
                           className={`text-sm whitespace-pre-line ${
-                            swapStatus.includes("❌") || swapStatus.includes("failed")
+                            swapStatus.includes("❌") || swapStatus.includes("falló")
                               ? "text-red-800 dark:text-red-200"
-                              : swapStatus.includes("✅") || swapStatus.includes("successfully")
+                              : swapStatus.includes("✅") || swapStatus.includes("exitosamente")
                                 ? "text-green-800 dark:text-green-200"
                                 : "text-blue-800 dark:text-blue-200"
                           }`}
@@ -769,7 +1038,7 @@ function App() {
                           rel="noreferrer"
                           className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-sm underline"
                         >
-                          View transaction on Etherscan →
+                          Ver transacción en Etherscan →
                         </a>
                       </div>
                     )}
@@ -778,13 +1047,13 @@ function App() {
               </section>
 
               <section>
-                <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">Recent Transactions</h2>
+                <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">Transacciones Recientes</h2>
                 <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
                   <button
                     onClick={fetchRecentTxs}
                     className="mb-4 py-2 px-4 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition-colors"
                   >
-                    Load Recent Transactions
+                    Cargar Transacciones Recientes
                   </button>
 
                   {txStatus && (
